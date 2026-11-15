@@ -4,6 +4,27 @@ plugins {
   id 'kotlin-kapt'
 }
 
+// App.getInfo() reads the installed APK's versionName. Stamp debug APKs at build time so
+// the About screen reports the artifact that is actually installed, not the current checkout.
+def repositoryDir = rootProject.projectDir.parentFile.canonicalFile
+def gitValue = { List<String> args ->
+  try {
+    def command = ['git', '-c', "safe.directory=${repositoryDir.path}", '-C', repositoryDir.path] + args
+    def process = new ProcessBuilder(command.collect { it.toString() }).redirectErrorStream(true).start()
+    def output = process.inputStream.getText('UTF-8').trim()
+    return process.waitFor() == 0 ? output : null
+  } catch (Exception ignored) {
+    return null
+  }
+}
+def debugBuildTime = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssSSS'Z'")
+  .withZone(java.time.ZoneOffset.UTC)
+  .format(java.time.Instant.now())
+def debugRevision = gitValue(['rev-parse', '--short=8', 'HEAD']) ?: 'nogit'
+def debugDirty = gitValue(['status', '--porcelain', '--untracked-files=normal'])
+def debugState = debugDirty == null ? '-state-unknown' : debugDirty ? '-dirty' : ''
+def debugBuildSuffix = "-debug+${debugBuildTime}.${debugRevision}${debugState}"
+
 kotlin {
   kotlinDaemonJvmArgs = [
     "-Dfile.encoding=UTF-8",
@@ -51,7 +72,7 @@ android {
   buildTypes {
     debug {
       applicationIdSuffix ".debug"
-      versionNameSuffix "-debug"
+      versionNameSuffix debugBuildSuffix
       minifyEnabled false
       proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
     }
@@ -74,6 +95,17 @@ tasks.register('verifyAndroidAutoBookmarkWebAssets') {
   }
 }
 tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn('verifyAndroidAutoBookmarkWebAssets') }
+
+// A native-only debug rebuild must not package an older WebView bundle without the About label.
+tasks.register('verifyDebugBuildInfoWebAssets') {
+  doLast {
+    def bundles = fileTree('src/main/assets/public/_nuxt') { include '**/*.js' }
+    if (!bundles.files.any { it.getText('UTF-8').contains('Custom Debug') }) {
+      throw new GradleException('Debug build info web assets are stale. Run npm run generate and npx cap sync android before building the APK.')
+    }
+  }
+}
+tasks.matching { it.name == 'preDebugBuild' }.configureEach { dependsOn('verifyDebugBuildInfoWebAssets') }
 
 repositories {
   flatDir {

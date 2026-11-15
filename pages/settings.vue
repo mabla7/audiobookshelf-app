@@ -175,6 +175,12 @@
       </div>
     </template>
 
+    <div v-if="customDebugBuild" class="mt-10">
+      <p class="uppercase text-xs font-semibold text-fg-muted mb-2">{{ $strings.HeaderAbout }}</p>
+      <p class="text-sm text-fg">Audiobookshelf {{ $config.version }}</p>
+      <p class="text-xs text-fg-muted mt-1">{{ customDebugBuild }}</p>
+    </div>
+
     <div v-show="loading" class="w-full h-full absolute top-0 left-0 flex items-center justify-center z-10">
       <ui-loading-indicator />
     </div>
@@ -186,6 +192,7 @@
 </template>
 
 <script>
+import { App } from '@capacitor/app'
 import { Dialog } from '@capacitor/dialog'
 import jumpLabelMixin from '@/mixins/jumpLabel'
 
@@ -194,6 +201,7 @@ export default {
   data() {
     return {
       loading: false,
+      customDebugBuild: '',
       deviceData: null,
       showMoreMenuDialog: false,
       showSleepTimerLengthModal: false,
@@ -679,10 +687,24 @@ export default {
       this.$store.commit('setDeviceData', this.deviceData)
       this.setDeviceSettings()
       this.loading = false
+    },
+    async loadCustomDebugBuild() {
+      if (this.$platform !== 'android') return
+      try {
+        const info = await App.getInfo()
+        if (!info.id?.endsWith('.debug')) return
+        const build = info.version?.match(/-debug\+(\d{8}T\d{9}Z)\.([a-f0-9]{8,}|nogit)(-dirty|-state-unknown)?$/)
+        if (!build) return
+        const state = build[3] ? ` · ${build[3].slice(1).replace('-', ' ')}` : ''
+        this.customDebugBuild = `Custom Debug · ${build[1]} · ${build[2]}${state}`
+      } catch (error) {
+        console.warn('Could not read debug APK version', error)
+      }
     }
   },
   mounted() {
     this.init()
+    this.loadCustomDebugBuild()
   }
 }
 </script>
